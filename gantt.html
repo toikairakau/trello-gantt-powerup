@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="https://p.trellocdn.com/power-up.min.css">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f4f5f7; }
+    .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+    h1 { color: #172b4d; margin: 0 0 20px 0; }
+    .controls { margin-bottom: 20px; padding: 15px; background: #f4f5f7; border-radius: 5px; }
+    .list-selector { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+    .list-checkbox { display: flex; align-items: center; gap: 5px; padding: 5px 10px; background: white; border-radius: 3px; cursor: pointer; }
+    .list-checkbox input { cursor: pointer; }
+    .gantt-container { overflow-x: auto; margin-top: 20px; }
+    .gantt-header { display: flex; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 10px; min-width: 1200px; }
+    .gantt-labels { width: 250px; flex-shrink: 0; font-weight: 600; color: #172b4d; }
+    .gantt-timeline { flex: 1; display: flex; position: relative; }
+    .timeline-header { display: flex; width: 100%; }
+    .timeline-day { flex: 1; text-align: center; font-size: 12px; color: #5e6c84; padding: 5px; border-left: 1px solid #e5e5e5; }
+    .gantt-row { display: flex; min-height: 40px; border-bottom: 1px solid #f0f0f0; align-items: center; min-width: 1200px; }
+    .gantt-row:hover { background: #f9f9f9; }
+    .row-label { width: 250px; flex-shrink: 0; padding: 8px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-timeline { flex: 1; position: relative; height: 100%; display: flex; align-items: center; }
+    .gantt-bar { position: absolute; height: 24px; border-radius: 3px; padding: 0 8px; color: white; font-size: 12px; display: flex; align-items: center; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,0.2); overflow: hidden; white-space: nowrap; }
+    .gantt-bar:hover { opacity: 0.9; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    .no-data { text-align: center; padding: 40px; color: #5e6c84; }
+    .loading { text-align: center; padding: 40px; color: #5e6c84; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Gantt Chart View</h1>
+    <div class="controls">
+      <strong>Select Lists to Display:</strong>
+      <div class="list-selector" id="listSelector"><div class="loading">Loading lists...</div></div>
+    </div>
+    <div id="ganttChart"><div class="loading">Select lists to view Gantt chart</div></div>
+  </div>
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
+  <script>
+    var t = window.TrelloPowerUp.iframe();
+    var allLists = [];
+    var allCards = [];
+    var selectedListIds = new Set();
+    var LIST_COLORS = ['#61bd4f', '#f2d600', '#ff9f1a', '#eb5a46', '#c377e0', '#0079bf', '#00c2e0', '#51e898', '#ff78cb', '#344563'];
+
+    function initialize() {
+      t.board('id', 'lists').then(function(board) {
+        allLists = board.lists;
+        var listSelector = document.getElementById('listSelector');
+        listSelector.innerHTML = '';
+        allLists.forEach(function(list) {
+          var label = document.createElement('label');
+          label.className = 'list-checkbox';
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.id = 'list-' + list.id;
+          checkbox.value = list.id;
+          checkbox.addEventListener('change', handleListSelection);
+          var span = document.createElement('span');
+          span.textContent = list.name;
+          label.appendChild(checkbox);
+          label.appendChild(span);
+          listSelector.appendChild(label);
+        });
+      }).catch(function(error) {
+        console.error('Error:', error);
+        document.getElementById('listSelector').innerHTML = '<div style="color: red;">Error loading lists</div>';
+      });
+    }
+
+    function handleListSelection() {
+      selectedListIds.clear();
+      document.querySelectorAll('.list-selector input:checked').forEach(function(cb) {
+        selectedListIds.add(cb.value);
+      });
+      if (selectedListIds.size === 0) {
+        document.getElementById('ganttChart').innerHTML = '<div class="no-data">Select at least one list</div>';
+        return;
+      }
+      loadCardsAndRenderGantt();
+    }
+
+    function loadCardsAndRenderGantt() {
+      document.getElementById('ganttChart').innerHTML = '<div class="loading">Loading cards...</div>';
+      t.cards('id', 'name', 'due', 'idList', 'url').then(function(cards) {
+        allCards = cards.filter(function(card) {
+          return selectedListIds.has(card.idList) && card.due;
+        });
+        renderGantt();
+      }).catch(function(error) {
+        console.error('Error:', error);
+        document.getElementById('ganttChart').innerHTML = '<div class="no-data">Error loading cards</div>';
+      });
+    }
+
+    function renderGantt() {
+      if (allCards.length === 0) {
+        document.getElementById('ganttChart').innerHTML = '<div class="no-data">No cards with due dates found</div>';
+        return;
+      }
+      var dates = allCards.map(function(c) { return new Date(c.due); });
+      var minDate = new Date(Math.min.apply(null, dates));
+      var maxDate = new Date(Math.max.apply(null, dates));
+      minDate.setDate(minDate.getDate() - 2);
+      maxDate.setDate(maxDate.getDate() + 2);
+      var daysDiff = Math.ceil((maxDate - minDate) / (1000 * 60 * 60 * 24));
+      var dateRange = [];
+      for (var i = 0; i < daysDiff; i++) {
+        var date = new Date(minDate);
+        date.setDate(date.getDate() + i);
+        dateRange.push(date);
+      }
+      var html = '<div class="gantt-container"><div class="gantt-header"><div class="gantt-labels">Card Name</div><div class="gantt-timeline"><div class="timeline-header">';
+      dateRange.forEach(function(date) {
+        html += '<div class="timeline-day">' + date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + '</div>';
+      });
+      html += '</div></div></div>';
+      allCards.forEach(function(card) {
+        var list = allLists.find(function(l) { return l.id === card.idList; });
+        var listIndex = allLists.findIndex(function(l) { return l.id === card.idList; });
+        var color = LIST_COLORS[listIndex % LIST_COLORS.length];
+        var cardDate = new Date(card.due);
+        var daysFromStart = Math.floor((cardDate - minDate) / (1000 * 60 * 60 * 24));
+        var leftPercent = (daysFromStart / daysDiff) * 100;
+        html += '<div class="gantt-row"><div class="row-label" title="' + card.name + '">' + card.name + '</div><div class="row-timeline">';
+        html += '<div class="gantt-bar" style="left: ' + leftPercent + '%; width: 3%; background-color: ' + color + ';" onclick="window.open(\'' + card.url + '\', \'_blank\')" title="' + card.name + ' - ' + list.name + '">' + card.name + '</div>';
+        html += '</div></div>';
+      });
+      html += '</div>';
+      document.getElementById('ganttChart').innerHTML = html;
+    }
+    initialize();
+  </script>
+</body>
+</html>
